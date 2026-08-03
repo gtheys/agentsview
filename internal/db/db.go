@@ -1116,12 +1116,6 @@ func open(ctx context.Context, path string, backgroundMaintenance bool) (*DB, er
 	if err := ctx.Err(); err != nil {
 		return closeOnError(err)
 	}
-	if err := d.migrateColumns(ctx); err != nil {
-		return closeOnError(fmt.Errorf("migrating columns: %w", err))
-	}
-	if err := ctx.Err(); err != nil {
-		return closeOnError(err)
-	}
 	if _, err := d.GetOrCreateDatabaseID(ctx); err != nil {
 		return closeOnError(fmt.Errorf("initializing database id: %w", err))
 	}
@@ -1136,6 +1130,12 @@ func open(ctx context.Context, path string, backgroundMaintenance bool) (*DB, er
 	}
 	if _, err := d.GetOrCreateArchiveSalt(ctx); err != nil {
 		return closeOnError(fmt.Errorf("initializing archive salt: %w", err))
+	}
+	if err := ctx.Err(); err != nil {
+		return closeOnError(err)
+	}
+	if err := d.migrateColumns(ctx); err != nil {
+		return closeOnError(fmt.Errorf("migrating columns: %w", err))
 	}
 	if err := ctx.Err(); err != nil {
 		return closeOnError(err)
@@ -1629,6 +1629,10 @@ var readOnlyRequiredTables = []string{
 	"model_pricing",
 	"model_pricing_bands",
 	"genai_pricing",
+	"source_archives",
+	"source_project_identity_observations",
+	"source_session_project_identity_snapshots",
+	"source_worktree_project_mappings",
 	"secret_findings",
 	"recall_entries",
 	"recall_evidence",
@@ -1670,6 +1674,13 @@ func readOnlyRequiredSchema() (map[string][]string, error) {
 		if _, err := conn.Exec(schemaSQL); err != nil {
 			readOnlyRequiredSchemaErr = fmt.Errorf(
 				"loading schema probe: %w", err,
+			)
+			return
+		}
+		store := bun.NewDB(conn, sqlitedialect.New())
+		if err := CreateCommonSchema(context.Background(), store); err != nil {
+			readOnlyRequiredSchemaErr = fmt.Errorf(
+				"loading common schema probe: %w", err,
 			)
 			return
 		}
@@ -2901,6 +2912,11 @@ func (db *DB) migrateColumns(ctx context.Context) error {
 		return err
 	}
 	if err := requeueInvalidArtifactPublicationsLocked(w); err != nil {
+		return err
+	}
+	if err := db.convergeSQLiteCommonSchemaLocked(
+		context.Background(), nil,
+	); err != nil {
 		return err
 	}
 
