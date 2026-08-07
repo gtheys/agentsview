@@ -834,7 +834,8 @@ func TestMigration_ResultContentColumn(t *testing.T) {
 			FROM tool_calls;
 		DROP TABLE tool_calls;
 		ALTER TABLE tool_calls_old RENAME TO tool_calls;
-	`)
+		DELETE FROM archive_metadata WHERE key = ?;
+	`, CommonSchemaCompatibilityMetadataKey)
 	requireNoError(t, err, "drop result_content column")
 
 	// Verify column is gone and tool_calls row exists.
@@ -993,7 +994,8 @@ func TestMigration_ToolResultEventsTable(t *testing.T) {
 	_, err = conn.Exec(fmt.Sprintf(`
 		DROP TABLE tool_result_events;
 		PRAGMA user_version = %d;
-	`, legacyVersion))
+		DELETE FROM archive_metadata WHERE key = ?;
+	`, legacyVersion), CommonSchemaCompatibilityMetadataKey)
 	requireNoError(t, err, "drop tool_result_events")
 
 	var count int
