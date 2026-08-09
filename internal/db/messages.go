@@ -834,7 +834,7 @@ func (db *DB) replaceArchiveSessionMessages(
 			return err
 		}
 	}
-	if !useDiff || len(plan.updates) > 0 {
+	if !useDiff || len(plan.updates) > 0 || len(plan.inserts) > 0 {
 		if err := reconcileRecallEvidenceForSessionTx(
 			context.Background(), tx, sessionID, &pendingRecallRevocations,
 		); err != nil {
@@ -1088,7 +1088,7 @@ func (db *DB) ReplaceSessionContent(
 			return err
 		}
 	}
-	if !useDiff || len(plan.updates) > 0 {
+	if !useDiff || len(plan.updates) > 0 || len(plan.inserts) > 0 {
 		if err := reconcileRecallEvidenceForSessionTx(
 			context.Background(), tx, sessionID, &pendingRecallRevocations,
 		); err != nil {
