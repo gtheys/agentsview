@@ -510,9 +510,15 @@ func (db *DB) InsertMessages(msgs []Message) error {
 	}
 	defer func() { _ = bunTx.Rollback() }()
 	tx := bunTx.Tx
+	var pendingRecallRevocations recallEvidenceRevocationEvents
 
 	writeSession := func(sessionID string, sessionMessages []Message) error {
 		if err := appendCanonicalMessageGraph(ctx, bunTx, sessionID, sessionMessages); err != nil {
+			return err
+		}
+		if err := reconcileRecallEvidenceForSessionTx(
+			ctx, tx, sessionID, &pendingRecallRevocations,
+		); err != nil {
 			return err
 		}
 		if err := bumpTranscriptRevisionTx(tx, sessionID); err != nil {
@@ -555,6 +561,7 @@ func (db *DB) InsertMessages(msgs []Message) error {
 		return err
 	}
 	db.notifyUsageSessions(sessionIDs)
+	pendingRecallRevocations.flush()
 	return nil
 }
 
@@ -646,6 +653,7 @@ func (db *DB) WriteSessionIncremental(
 	}
 	defer func() { _ = bunTx.Rollback() }()
 	tx := bunTx.Tx
+	var pendingRecallRevocations recallEvidenceRevocationEvents
 
 	if err := appendCanonicalMessageGraph(
 		ctx, bunTx, sessionID, msgs,
@@ -661,6 +669,13 @@ func (db *DB) WriteSessionIncremental(
 			return err
 		}
 		transcriptChanged = transcriptChanged || changed
+	}
+	if len(msgs) > 0 {
+		if err := reconcileRecallEvidenceForSessionTx(
+			ctx, tx, sessionID, &pendingRecallRevocations,
+		); err != nil {
+			return err
+		}
 	}
 	if transcriptChanged {
 		if err := bumpTranscriptRevisionTx(tx, sessionID); err != nil {
@@ -680,6 +695,7 @@ func (db *DB) WriteSessionIncremental(
 		return fmt.Errorf("committing incremental write tx: %w", err)
 	}
 	db.notifyUsageSessions([]string{sessionID})
+	pendingRecallRevocations.flush()
 	return nil
 }
 
