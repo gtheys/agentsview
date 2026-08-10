@@ -453,7 +453,10 @@ CREATE INDEX IF NOT EXISTS idx_provider_freshness_updated_at
 // cache/last_conversations.json workspace mapping. Existing rows need
 // re-parsing to receive the exact approved workspace and prefer linked Git
 // identity when normalizing worktree project labels.)
-const dataVersion = 96
+// (97: Canonical message timestamps. Existing live sessions are re-parsed and
+// unsupported timestamps in orphaned and trashed sessions are blanked before
+// strict Bun reads or replication can observe them.)
+const dataVersion = 97
 
 const tokenCoverageRepairStatsKey = "token_coverage_repair_v1"
 

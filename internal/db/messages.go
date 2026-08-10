@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/uptrace/bun"
+	"go.kenn.io/agentsview/internal/db/bunmodel"
 	"go.kenn.io/agentsview/internal/parser"
 )
 
@@ -506,6 +507,8 @@ func (db *DB) InsertMessages(msgs []Message) error {
 	if len(msgs) == 0 {
 		return nil
 	}
+	msgs = append([]Message(nil), msgs...)
+	_ = ValidateAndSanitize(nil, msgs, nil)
 	t := time.Now()
 	defer func() {
 		if d := time.Since(t); d > slowOpThreshold {
@@ -1744,12 +1747,34 @@ func scanMessages(rows *sql.Rows) ([]Message, error) {
 		if err != nil {
 			return nil, fmt.Errorf("scanning message: %w", err)
 		}
+		m.Timestamp, err = canonicalStoredMessageTimestamp(m.Timestamp)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"scanning message %s ordinal %d timestamp: %w",
+				m.SessionID, m.Ordinal, err,
+			)
+		}
 		if tokenUsage != "" {
 			m.TokenUsage = jsontext.Value(tokenUsage)
 		}
 		msgs = append(msgs, m)
 	}
 	return msgs, rows.Err()
+}
+
+func canonicalStoredMessageTimestamp(value string) (string, error) {
+	if value == "" {
+		return "", nil
+	}
+	timestamp, err := bunmodel.ParseTimestamp(value)
+	if err != nil {
+		return "", err
+	}
+	if !isPlausibleTime(timestamp.Time) {
+		return "", fmt.Errorf("implausible timestamp %q", value)
+	}
+	return timestamp.Time.UTC().Truncate(time.Microsecond).
+		Format(time.RFC3339Nano), nil
 }
 
 // MessageCount returns the number of messages for a session.
@@ -1898,8 +1923,7 @@ func (db *DB) MessageContentHashFingerprint(sessionID string) (string, error) {
 // MessageTokenFingerprint, which deliberately excludes these two
 // columns; without it, role-only or timestamp-only parser drift would
 // never trigger the tier-2 row comparison. Role is sanitized to mirror
-// the tier-2 compare in messageMetadataDiff; timestamp is compared raw
-// there, so it stays raw here. timestamp is nullable, so a NULL is
+// the tier-2 compare in messageMetadataDiff. timestamp is nullable, so a NULL is
 // coalesced to the empty string to match both the in-memory twin (which
 // emits "" for a zero-value Go timestamp) and the tier-2 read path
 // (selectMessageCols coalesces the same way); without it a single
@@ -1937,6 +1961,13 @@ func (db *DB) MessageRoleTimeFingerprintWithTimestampNormalizer(
 		var role, timestamp string
 		if err := rows.Scan(&ordinal, &role, &timestamp); err != nil {
 			return "", err
+		}
+		timestamp, err = canonicalStoredMessageTimestamp(timestamp)
+		if err != nil {
+			return "", fmt.Errorf(
+				"fingerprinting message %s ordinal %d timestamp: %w",
+				sessionID, ordinal, err,
+			)
 		}
 		appendRoleTimeFingerprintRow(
 			&b, ordinal, role, timestamp, normalizeTimestamp,
@@ -2301,6 +2332,13 @@ func (db *DB) GetMessageByOrdinal(
 	}
 	if err != nil {
 		return nil, err
+	}
+	m.Timestamp, err = canonicalStoredMessageTimestamp(m.Timestamp)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"reading message %s ordinal %d timestamp: %w",
+			sessionID, ordinal, err,
+		)
 	}
 	if tokenUsage != "" {
 		m.TokenUsage = jsontext.Value(tokenUsage)
