@@ -1068,6 +1068,11 @@ func TestCurrentDataVersionAntigravityCLICwdAndWorktreeProject(t *testing.T) {
 		"Antigravity CLI cwd and worktree project recovery require a sequential backfill")
 }
 
+func TestCurrentDataVersionCanonicalTimestamps(t *testing.T) {
+	assert.Equal(t, 97, CurrentDataVersion(),
+		"canonical timestamp repair requires a sequential backfill")
+}
+
 func TestInsertMessages_PreservesToolResultEvents(t *testing.T) {
 	d := testDB(t)
 	insertSession(t, d, "s-events", "proj")
