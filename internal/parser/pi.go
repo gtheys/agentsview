@@ -5,6 +5,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -513,20 +514,22 @@ func parsePiAssistantMessage(
 // at the skill's SKILL.md (Pi resolves skills from many roots:
 // ~/.pi/agent/skills, project .pi/skills, .agents/skills, package
 // skills/, --skill <path>), or, in newer OMP builds, at a
-// skill://<name> URI. Without attribution these calls inflate the Read
-// tool count and leave the Skills dimension empty. Relative SKILL.md
-// paths resolve against the session working directory (sessionCwd).
+// skill://<name> URI in that read path. Without attribution these calls
+// inflate the Read tool count and leave the Skills dimension empty.
+// Relative SKILL.md paths resolve against the session working directory
+// (sessionCwd).
 func inferPiSkillName(toolName, inputJSON, sessionCwd string) string {
-	if skill, ok := piSkillURISkillName(inputJSON); ok {
-		return skill
-	}
 	if isCursorSkillReadTool(toolName) {
 		// Pi's read input carries no cwd/workdir key, so
 		// inferSkillNameFromJSONPaths can't resolve relative SKILL.md
 		// paths; try the path keys directly against the session working
 		// directory first, mirroring the OpenCode parser.
 		for _, key := range []string{"path", "file_path"} {
-			if fp := gjson.Get(inputJSON, key).Str; fp != "" && sessionCwd != "" {
+			fp := gjson.Get(inputJSON, key).Str
+			if skill, ok := piSkillURISkillName(fp); ok {
+				return skill
+			}
+			if fp != "" && sessionCwd != "" {
 				if name := skillNameFromPath(fp, sessionCwd); name != "" {
 					return name
 				}
@@ -537,31 +540,24 @@ func inferPiSkillName(toolName, inputJSON, sessionCwd string) string {
 	return inferCodexSkillNameWithBase(toolName, inputJSON, sessionCwd)
 }
 
-// piSkillURISkillName extracts a skill name from a skill://<name>
-// URI appearing anywhere in a Pi tool call's input JSON. Pi-family
-// producers pass the URI as the read path, but any string field may
-// carry it, so the whole input is scanned. ok is false when no URI
-// is present, leaving attribution to the other heuristics.
-func piSkillURISkillName(inputJSON string) (string, bool) {
-	idx := strings.Index(inputJSON, "skill://")
-	if idx < 0 {
+// piSkillURISkillName extracts the decoded skill name from the
+// skill://<name> URI used as a Pi-family read path. ok is false when
+// path is not a valid skill URI, leaving attribution to the SKILL.md
+// path heuristic.
+func piSkillURISkillName(path string) (string, bool) {
+	path = strings.TrimSpace(path)
+	if !strings.HasPrefix(path, "skill://") {
 		return "", false
 	}
-	rest := inputJSON[idx+len("skill://"):]
-	end := 0
-	for end < len(rest) {
-		c := rest[end]
-		if c == '"' || c == '\\' || c == ' ' || c == '\t' ||
-			c == '\n' || c == '\r' || c == '?' || c == '#' {
-			break
-		}
-		end++
+	rest := path[len("skill://"):]
+	if end := strings.IndexAny(rest, "/?# \t\n\r"); end >= 0 {
+		rest = rest[:end]
 	}
-	name := strings.TrimLeft(rest[:end], "/")
-	if idx := strings.IndexByte(name, '/'); idx >= 0 {
-		name = name[:idx]
+	if rest == "" {
+		return "", false
 	}
-	if name == "" {
+	name, err := url.PathUnescape(rest)
+	if err != nil || name == "" {
 		return "", false
 	}
 	return name, true

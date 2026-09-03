@@ -3,6 +3,8 @@ package parser
 import (
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -74,13 +76,13 @@ func TestInferPiSkillNameReadFrontmatter(t *testing.T) {
 	require.NoError(t, os.MkdirAll(skillDir, 0o755))
 	skillFile := filepath.Join(skillDir, "SKILL.md")
 	require.NoError(t, os.WriteFile(skillFile, []byte(
-		"---\nname: deploy-docs\ndescription: Deployment guides\n---\n\nbody\n",
+		"---\nname: canonical-deploy-docs\ndescription: Deployment guides\n---\n\nbody\n",
 	), 0o644))
 
 	got := inferPiSkillName(
-		"read", `{"path":"/opt/skills/deploy-docs/SKILL.md"}`, "",
+		"read", `{"path":`+strconv.Quote(skillFile)+`}`, "",
 	)
-	assert.Equal(t, "deploy-docs", got)
+	assert.Equal(t, "canonical-deploy-docs", got)
 }
 
 func TestInferPiSkillNameSkillURI(t *testing.T) {
@@ -97,22 +99,22 @@ func TestInferPiSkillNameSkillURI(t *testing.T) {
 			want:      "create-plan",
 		},
 		{
-			name:      "leading slashes are trimmed",
-			toolName:  "read",
-			inputJSON: `{"path":"skill:///review-pr"}`,
-			want:      "review-pr",
-		},
-		{
 			name:      "bare name is attributed",
 			toolName:  "read",
 			inputJSON: `{"path":"skill://coding-standards"}`,
 			want:      "coding-standards",
 		},
 		{
-			name:      "URI in any string field is attributed",
-			toolName:  "view",
-			inputJSON: `{"url":"skill://deploy-docs"}`,
-			want:      "deploy-docs",
+			name:      "percent-encoded namespace is decoded",
+			toolName:  "read",
+			inputJSON: `{"path":"skill://superpowers%3Abrainstorming"}`,
+			want:      "superpowers:brainstorming",
+		},
+		{
+			name:      "URI mention in a non-read tool is not a skill load",
+			toolName:  "write",
+			inputJSON: `{"path":"notes.md","content":"See skill://deploy-docs"}`,
+			want:      "",
 		},
 		{
 			name:      "query suffix is stripped",
@@ -188,16 +190,13 @@ func TestInferPiSkillNameShellCommand(t *testing.T) {
 }
 
 func TestPiProviderAttributesSkillNames(t *testing.T) {
-	fixturePath := createTestFile(
-		t, "pi-session.jsonl",
-		loadFixture(t, "pi/session.jsonl"),
-	)
-	sess, msgs, err := parsePiTestSession(t, fixturePath, "", "local")
-	require.NoError(t, err)
-
-	// The fixture header carries cwd /Users/alice/code/my-project and
-	// entry-2 holds one read tool call with file_path auth.go. No
-	// SKILL.md is involved, so no skill name may be attributed.
-	assert.Equal(t, "", msgs[1].ToolCalls[0].SkillName)
-	assert.NotEmpty(t, sess.Cwd)
+	_, msgs := parsePiLikeTestSession(t, AgentPi, strings.Join([]string{
+		`{"type":"session","version":3,"id":"skill-test","timestamp":"2026-09-03T10:00:00Z","cwd":"/worktrees/demo"}`,
+		`{"type":"message","id":"entry-1","parentId":null,"timestamp":"2026-09-03T10:00:01Z","message":{"role":"user","content":[{"type":"text","text":"Review this change"}]}}`,
+		`{"type":"message","id":"entry-2","parentId":"entry-1","timestamp":"2026-09-03T10:00:02Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"tool-1","name":"read","arguments":{"path":"skills/code-review/SKILL.md"}},{"type":"toolCall","id":"tool-2","name":"read","arguments":{"path":"auth.go"}}]}}`,
+	}, "\n"))
+	require.Len(t, msgs, 2)
+	require.Len(t, msgs[1].ToolCalls, 2)
+	assert.Equal(t, "code-review", msgs[1].ToolCalls[0].SkillName)
+	assert.Empty(t, msgs[1].ToolCalls[1].SkillName)
 }
